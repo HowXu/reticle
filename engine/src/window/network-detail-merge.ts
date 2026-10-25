@@ -31,27 +31,43 @@ function keyOf(data: Record<string, unknown>): string {
 }
 
 /**
- * Fold each NET_DETAIL onto the matching in-page NET_REQUEST (by method+url), enriching it with the
- * authoritative headers/resourceType the page-side wrapper couldn't see — WITHOUT clobbering fields the
- * in-page event already carries. A NET_DETAIL with no matching request is kept as its own event (a
- * response the wrapper missed is signal, never silently dropped). Pure over the event list.
+ * Fold wire details by method+url, and SDK response bodies by request id plus method+url.
+ * SDK body details finish background capture without adding another request to counts or settle.
+ * Keep unmatched details rather than attaching them to another request. Pure over the event list.
  */
 export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEvent[] {
   const requestByKey = new Map<string, ReticleEvent>();
+  const requestById = new Map<string, ReticleEvent>();
   for (const e of events) {
-    if (e.type === EventType.NET_REQUEST) requestByKey.set(keyOf(e.data), e);
+    if (e.type !== EventType.NET_REQUEST) continue;
+    requestByKey.set(keyOf(e.data), e);
+    if ('string' === typeof e.data['id']) requestById.set(e.data['id'], e);
   }
   const out: ReticleEvent[] = [];
   const enriched = new Map<ReticleEvent, ReticleEvent>();
   for (const e of events) {
     if (e.type === EventType.NET_DETAIL) {
-      const match = requestByKey.get(keyOf(e.data));
-      if (match === undefined) {
+      const responseBody = e.data['responseBody'];
+      const id = e.data['id'];
+      // SDK body details carry the page's request id. URL alone mixes concurrent streams at one endpoint.
+      const match =
+        'string' === typeof responseBody
+          ? 'string' === typeof id
+            ? requestById.get(id)
+            : undefined
+          : requestByKey.get(keyOf(e.data));
+      if (match === undefined || keyOf(match.data) !== keyOf(e.data)) {
         out.push(e); // unmatched detail survives on its own
         continue;
       }
       const base = enriched.get(match) ?? match;
       const data = { ...base.data };
+      if ('string' === typeof responseBody) {
+        data['responseBody'] = responseBody;
+        if (true === e.data['responseBodyTruncated']) data['responseBodyTruncated'] = true;
+        else delete data['responseBodyTruncated'];
+        delete data['responseBodyReason'];
+      }
       if (data['headers'] === undefined && e.data['headers'] !== undefined) {
         data['headers'] = e.data['headers'];
       }

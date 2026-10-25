@@ -19,8 +19,8 @@ import {
   projectErrorBody,
   shouldCaptureErrorBody,
   skippedBodyReason,
-  withBodyDeadline,
 } from './net-detail/network-body.js';
+import { captureResponseBody, isEventStream } from './net-detail/network-response-body.js';
 import { redactUrl, netUrlFields } from './net-detail/network-redact.js';
 import { watchStreamedBody } from './network-stream.js';
 import { requireCapturedMethod } from '@/util/captured-method.js';
@@ -477,6 +477,7 @@ export function installNetwork(emit: Emit, opts: NetworkOptions = {}): Teardown 
   const owner = {};
   pageSlots()[PAGE_CAPTURE] = owner;
   const captureBodies = true === opts.captureBodies;
+  const bodyCapture = new AbortController();
   // Default TRUE, unlike `captureBodies`. The two answer different questions: the general flag is a
   // volume-and-privacy decision about every 200 the app makes, and this one is about the handful of
   // bytes that say why something broke. See `shouldCaptureErrorBody`.
@@ -581,60 +582,28 @@ export function installNetwork(emit: Emit, opts: NetworkOptions = {}): Teardown 
       // applies to non-2xx responses even with body capture off. That is the intended trade: an
       // ordering caveat on requests that already failed, in exchange for the cause of the failure.
       const wantErrorBody = shouldCaptureErrorBody(res.status, captureErrorBodies);
-      if ((captureBodies || wantErrorBody) && isCapturableType(contentType)) {
-        // ONLY the body read can make the app wait (a chunked response with no content-length can be
-        // arbitrarily long). Clone synchronously so the app's stream is untouched, then read + emit from
-        // a DETACHED promise — the app already has res, so our bounded read is invisible to it. Without
-        // body capture (the DEFAULT) we emit synchronously below, exactly as before: no latency, no
-        // deferral, NET_REQUEST in order.
-        //
-        // Tradeoff, opt-in path only: under captureBodies the NET_REQUEST for THIS call lands after the
-        // bounded body read (≤ the deadline), so it can arrive out of order vs a later request's
-        // NET_PENDING, and a BARE `assert { net, count }` fired the instant the app's fetch resolves may
-        // see the count not-yet-incremented. Use `wait_for` for count/settle assertions when body
-        // capture is on (it already polls until the event lands). The default path has neither caveat.
-        let clone: Response | undefined;
-        try {
-          clone = res.clone();
-        } catch {
-          /* already consumed/locked — emit the envelope with no body */
-        }
-        // The whole IIFE is guarded: emit is the SDK's already-try/catch'd sink today, but a detached
-        // promise must never be able to surface an unhandledrejection into the host page even if a
-        // future caller passes a throwing emit. A body we can't read is simply dropped.
-        void (async () => {
-          // Capture was asked for and no body is recorded unless the read below succeeds: say why,
-          // so a body clause reads `unknown` rather than "capture is off" (#1520).
-          let responseBodyFields: Record<string, unknown> = captureBodies
-            ? { responseBodyReason: ResponseBodyReason.UNREADABLE }
-            : {};
-          if (clone !== undefined) {
-            try {
-              const text = await withBodyDeadline(clone.text());
-              if (text !== undefined) {
-                // Under the error-only path the tighter cap applies; when the app asked for body
-                // capture, a failure is projected exactly like any other response.
-                const { body, truncated } = captureBodies
-                  ? projectBody(text, contentType)
-                  : projectErrorBody(text, contentType);
-                responseBodyFields = {
-                  responseBody: body,
-                  ...(truncated ? { responseBodyTruncated: true } : {}),
-                  // Says WHY a body is here when the app never asked for bodies, so a reader does
-                  // not conclude that capture is on and trust an absent body on a 200.
-                  ...(captureBodies ? {} : { responseBodyReason: ResponseBodyReason.ERROR_STATUS }),
-                };
-              }
-            } catch {
-              /* body not readable — skip, keep the envelope */
-            }
-          }
-          try {
-            emitRequest(responseBodyFields);
-          } catch {
-            /* observation is best-effort; never reject into the page */
-          }
-        })().catch(() => undefined);
+      if (captureBodies && isEventStream(contentType)) {
+        // SSE headers complete the request for settle. Its bounded body arrives as detail, not a second call.
+        emitRequest({ responseBodyReason: ResponseBodyReason.UNREADABLE });
+        void captureResponseBody(res, contentType, true, bodyCapture.signal)
+          .then((fields) =>
+            observeSafely(() =>
+              emit(EventType.NET_DETAIL, {
+                id,
+                method,
+                ...urlFields,
+                ...fields,
+              }),
+            ),
+          )
+          .catch(() => undefined);
+      } else if ((captureBodies || wantErrorBody) && isCapturableType(contentType)) {
+        // Clone before returning the response. Read and emit in the background so the app never waits.
+        // NET_REQUEST arrives after capture completes. Use wait_for for immediate count/body assertions.
+        // Ordinary responses keep their existing 500ms deadline.
+        void captureResponseBody(res, contentType, captureBodies, bodyCapture.signal)
+          .then(emitRequest)
+          .catch(() => undefined);
       } else {
         // A type capture skips on purpose (a stream, a binary body) says so when capture is on.
         const skipped = captureBodies ? skippedBodyReason(contentType) : undefined;
@@ -733,19 +702,18 @@ export function installNetwork(emit: Emit, opts: NetworkOptions = {}): Teardown 
               // responseText throws unless responseType is '' or 'text' — guard before reading.
               const textReadable = '' === this.responseType || 'text' === this.responseType;
               const wantXhrErrorBody = shouldCaptureErrorBody(this.status, captureErrorBodies);
+              const capturable =
+                isCapturableType(xhrContentType) ||
+                (captureBodies && isEventStream(xhrContentType));
               // As on the fetch path: with capture on, a body that is not recorded says why (#1520).
               if (captureBodies) {
                 // A capturable type is unread only when the read fails or `responseType` is not text.
-                const skipped = isCapturableType(xhrContentType)
+                const skipped = capturable
                   ? ResponseBodyReason.UNREADABLE
                   : skippedBodyReason(xhrContentType);
                 if (skipped !== undefined) responseBodyFields = { responseBodyReason: skipped };
               }
-              if (
-                (captureBodies || wantXhrErrorBody) &&
-                textReadable &&
-                isCapturableType(xhrContentType)
-              ) {
+              if ((captureBodies || wantXhrErrorBody) && textReadable && capturable) {
                 try {
                   const { body: rb, truncated } = captureBodies
                     ? projectBody(this.responseText, xhrContentType)
@@ -972,7 +940,10 @@ export function installNetwork(emit: Emit, opts: NetworkOptions = {}): Teardown 
   }
 
   return () => {
-    if (pageSlots()[PAGE_CAPTURE] === owner) delete pageSlots()[PAGE_CAPTURE];
+    if (pageSlots()[PAGE_CAPTURE] === owner) {
+      delete pageSlots()[PAGE_CAPTURE];
+    }
+    bodyCapture.abort();
     subresourceObserver?.disconnect();
     // Restore each slot ONLY if it still holds OUR wrapper. Between connect() and disconnect() the app
     // (or Sentry/analytics/a router) may have wrapped fetch/XHR/EventSource/WebSocket/sendBeacon ON TOP

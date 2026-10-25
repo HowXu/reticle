@@ -14,6 +14,7 @@ import {
 import { isReticleVoice } from '../../state-bookkeeping.js';
 import { describeObserved } from './observed-in-window.js';
 import { netEvidence } from './net-evidence.js';
+import { mergeNetworkDetail } from '@/window/network-detail-merge.js';
 import {
   checkRequestBody,
   REMEDY_BODY_CAPTURE,
@@ -274,6 +275,10 @@ export function evalNet(
   events: ReticleEvent[],
   p: Extract<Predicate, { kind: typeof PredicateKind.NET }>,
 ): EvalResult {
+  // SSE headers close the request immediately. A later detail supplies its captured body without another call.
+  if (p.bodyContains !== undefined || p.bodyMatches !== undefined) {
+    events = mergeNetworkDetail(events);
+  }
   const since = p.since ?? 0;
   /**
    * Computed once: the gate every zero-match downgrade below reads. True means the resource-timing

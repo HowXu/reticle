@@ -6,20 +6,16 @@
 import { REDACTED_VALUE, ResponseBodyReason } from '@reticlehq/core';
 import { isSensitiveKey, safeStringify, scrubKnownSecrets } from '@/security/serialization.js';
 import { nativeClearTimeout, nativeSetTimeout } from '@/timers/native/native-timers.js';
+import { isEventStream, redactEventStream } from './network-event-stream.js';
 
 /** Only text-like bodies are worth capturing; binary (images/fonts/octet-stream) is skipped. */
 const CAPTURABLE_CONTENT =
   /application\/json|text\/|application\/xml|x-www-form-urlencoded|graphql/i;
 
 /**
- * Content types that are STREAMS, never complete bodies.
- *
- * `text/event-stream` matches `text/` in CAPTURABLE_CONTENT, and body capture awaited
- * `res.clone.text` BEFORE returning the response to the app. A clone of a stream only settles when
- * the stream ends — and an SSE stream does not end — so the app's `await fetch...)` never resolved.
- * Enabling body capture silently hung every streaming endpoint (SSE, and the chunked `application/json`
- * every token-streaming model API uses), leaving a permanently loading UI with no reason to suspect the
- * observability SDK. Never read these; the frame observer covers SSE properly.
+ * Streams must not use the ordinary complete-body reader.
+ * SSE capture uses a separate bounded reader when general body capture is on (#1848).
+ * Other streaming types remain unsupported. EventSource frames have their own observer.
  */
 const STREAMING_CONTENT = /event-stream|x-ndjson|application\/stream/i;
 
@@ -53,20 +49,15 @@ export function isStreamingBody(contentType: string | null, contentLength: strin
 /**
  * Longest the SDK will wait on a response-body clone before emitting without it.
  *
- * Two layers protect the app. `text/event-stream` and friends are skipped outright, which covers the
- * common streaming case at zero cost. This deadline is the backstop for a body that streams WITHOUT
- * announcing it in its content type — chunked `application/json` from a token-streaming API. Gating on
- * NOT gated on `content-length`: plenty of complete responses omit it (gzip, HTTP/2), so that
- * silently stops capturing bodies for ordinary apps. A bounded half-second on a rare path beats an
- * unbounded hang, and beats losing capture everywhere.
+ * SSE uses its own bounded stream reader. This deadline handles ordinary bodies, including chunked
+ * JSON responses. Do not gate on content-length: complete compressed responses can omit it too.
  */
 const BODY_READ_TIMEOUT_MS = 500;
 
 /**
  * Resolve with the body text, or `undefined` if it takes too long.
  *
- * The app is already awaiting the patched fetch, so any unbounded read here is a hang in the host app.
- * Losing an observation is always preferable to freezing the page being observed.
+ * Body reads run in the background. The deadline bounds how long their network records stay pending.
  */
 export async function withBodyDeadline(read: Promise<string>): Promise<string | undefined> {
   // The timer is CLEARED on the winning path. Left uncleared, every captured body leaves a live timer
@@ -198,9 +189,12 @@ function redactText(text: string): string {
       // token behind, so the scheme rule must run before it.
       .replace(AUTH_SCHEME_TOKEN, (_m: string, scheme: string) => `${scheme} ${REDACTED_VALUE}`)
       .replace(
-        /([A-Za-z0-9_.-]+)(\s*[=:]\s*"?)([^&\s,;"}]+)/g,
-        (match: string, key: string, sep: string) =>
-          isSensitiveKey(key) ? `${key}${sep}${REDACTED_VALUE}` : match,
+        /([A-Za-z0-9_.-]+)("?\s*[=:]\s*)("(?:\\.|[^"\\])*"?|[^&\s,;"}]+)/g,
+        (match: string, key: string, sep: string, value: string) => {
+          if (!isSensitiveKey(key)) return match;
+          const redacted = value.startsWith('"') ? `"${REDACTED_VALUE}"` : REDACTED_VALUE;
+          return `${key}${sep}${redacted}`;
+        },
       )
   );
 }
@@ -275,6 +269,7 @@ export function projectBody(
   const scanChars = scanWidth(!isJson);
   const oversized = rawText.length > scanChars;
   const text = oversized ? rawText.slice(0, scanChars) : rawText;
+  let incomplete = false;
   let out: string;
   if (isJson) {
     try {
@@ -284,6 +279,10 @@ export function projectBody(
     } catch {
       out = redactText(text); // looked like JSON but wasn't — still redact key/value + auth tokens
     }
+  } else if (isEventStream(contentType)) {
+    const projected = redactEventStream(text);
+    out = redactText(projected.body);
+    incomplete = projected.truncated;
   } else {
     out = redactText(text);
   }
@@ -292,6 +291,6 @@ export function projectBody(
   out = scrubKnownSecrets(out);
   // Truncated if the projection overflows the cap OR the input itself was clipped above — a body the
   // SDK never fully read must not be reported as complete.
-  const truncated = oversized || out.length > bodyMaxChars;
+  const truncated = incomplete || oversized || out.length > bodyMaxChars;
   return { body: out.length > bodyMaxChars ? out.slice(0, bodyMaxChars) : out, truncated };
 }
