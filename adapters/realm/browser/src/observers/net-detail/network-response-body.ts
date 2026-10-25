@@ -28,7 +28,11 @@ async function readEventStream(
   let stopped = false;
   let stop = (): void => undefined;
   const interrupted = new Promise<void>((resolve) => {
-    stop = resolve;
+    stop = () => {
+      // Pending reads can resume before the race continuation runs its cleanup.
+      stopped = true;
+      resolve();
+    };
   });
   const timer = nativeSetTimeout(stop, EVENT_STREAM_READ_MS);
   signal.addEventListener('abort', stop, { once: true });
@@ -56,7 +60,6 @@ async function readEventStream(
   } catch {
     // A read error leaves an incomplete prefix, not a complete response.
   } finally {
-    stopped = true;
     nativeClearTimeout(timer);
     signal.removeEventListener('abort', stop);
     if (!complete) void reader.cancel().catch(() => undefined);

@@ -147,6 +147,48 @@ describe('bounded SSE body capture (#1848)', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each(['deadline', 'abort'])(
+    'does not retain a chunk delivered after %s wins the read race',
+    async (reason) => {
+      const abort = new AbortController();
+      let write = (_text: string): void => undefined;
+      let finish = (): void => undefined;
+      let first = true;
+      // Keep the read promises in this realm so the test controls their exact microtask order.
+      const reader = {
+        read(): Promise<ReadableStreamReadResult<Uint8Array>> {
+          if (first) {
+            first = false;
+            return Promise.resolve({ done: false, value: encoder.encode('data: first\n\n') });
+          }
+          return new Promise((resolve) => {
+            write = (text) => resolve({ done: false, value: encoder.encode(text) });
+            finish = () => resolve({ done: true, value: undefined });
+          });
+        },
+        cancel() {
+          finish();
+          return Promise.resolve();
+        },
+        releaseLock: () => undefined,
+      };
+      const res = { clone: () => ({ body: { getReader: () => reader } }) } as unknown as Response;
+      const pending = capture(res, abort.signal);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Resolve the stop and the pending read in one turn, before promise continuations run.
+      if ('deadline' === reason) vi.advanceTimersByTime(10_000);
+      else abort.abort();
+      write('data: too late\n\n');
+
+      expect(await pending).toEqual({
+        responseBody: 'data: first\n\n',
+        responseBodyTruncated: true,
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it.each([
     {
       input: '{"recoveryCodes":["first-code","second-code"],"answer":"hello"}',
