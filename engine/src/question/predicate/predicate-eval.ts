@@ -223,13 +223,13 @@ function wantedBody(p: Extract<Predicate, { kind: typeof PredicateKind.NET }>): 
  */
 export function skippedBodyRemedy(reason: unknown): string | undefined {
   if (ResponseBodyReason.STREAMING === reason) {
-    return 'The body was streamed (text/event-stream or ndjson): the SDK never reads a stream, because reading it would hang the app, and capture is already on. Assert the result in the DOM or in state instead, or use a non-streaming endpoint.';
+    return 'The body was streamed in an unsupported format (such as ndjson), and capture is already on. Assert the result in the DOM or in state instead, or use a non-streaming endpoint.';
   }
   if (ResponseBodyReason.NOT_TEXT === reason) {
     return 'The body is not text (binary, or a content type that is not recorded), and capture is already on. Assert the result in the DOM or in state instead.';
   }
   if (ResponseBodyReason.UNREADABLE === reason) {
-    return 'The body could not be read before the read deadline, and capture is already on. A response that is still streaming does this. Assert the result in the DOM or in state instead.';
+    return 'The body is not available yet or could not be read, and capture is already on. SSE capture can take up to 10 seconds. Use wait_for with a sufficient timeout to retry the body assertion. If the body remains unavailable, assert the result in the DOM or in state instead.';
   }
   return undefined;
 }

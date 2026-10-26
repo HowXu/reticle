@@ -49,7 +49,7 @@ async function requestFor(res: Response, captureBodies: boolean): Promise<Record
   await fetch('/mcp', { method: 'POST' });
   await flush();
   const request =
-    events.find((e) => e.type === EventType.NET_DETAIL) ??
+    events.find((e) => e.type === EventType.NET_RESPONSE_BODY) ??
     events.find((e) => e.type === EventType.NET_REQUEST);
   expect(request).toBeDefined();
   return request?.data ?? {};

@@ -589,16 +589,19 @@ export function installNetwork(emit: Emit, opts: NetworkOptions = {}): Teardown 
         // SSE headers complete the request for settle. Its bounded body arrives as detail, not a second call.
         emitRequest({ responseBodyReason: ResponseBodyReason.UNREADABLE });
         void captureResponseBody(res, contentType, true, bodyCapture.signal)
-          .then((fields) =>
+          .then((fields) => {
+            if (typeof fields['responseBody'] !== 'string') {
+              return;
+            }
             observeSafely(() =>
-              emit(EventType.NET_DETAIL, {
+              emit(EventType.NET_RESPONSE_BODY, {
                 id,
                 method,
                 ...urlFields,
                 ...fields,
               }),
-            ),
-          )
+            );
+          })
           .catch(() => undefined);
       } else if ((captureBodies || wantErrorBody) && isCapturableType(contentType)) {
         // Clone before returning the response. Read and emit in the background so the app never waits.

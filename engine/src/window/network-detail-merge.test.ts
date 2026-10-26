@@ -21,10 +21,16 @@ function request(id: string, extra: Record<string, unknown> = {}): ReticleEvent 
 
 function detail(id: string, body: string, extra: Record<string, unknown> = {}): ReticleEvent {
   return {
-    type: EventType.NET_DETAIL,
+    type: EventType.NET_RESPONSE_BODY,
     sessionId: 'sse-test',
     t: 2,
-    data: { id, method: 'POST', url: '/api/chat', responseBody: body, ...extra },
+    data: {
+      id,
+      method: 'POST',
+      url: '/api/chat',
+      responseBody: body,
+      ...extra,
+    },
   };
 }
 
@@ -38,6 +44,38 @@ describe('SSE bodies enrich the completed request without duplicating it (#1848)
     expect(merged[0]?.data['responseBody']).toBe('data: hello\n\n');
     expect(merged[0]?.data['responseBodyReason']).toBeUndefined();
     expect(merged[0]?.data['responseBodyTruncated']).toBeUndefined();
+  });
+
+  it('merges a wire detail carrying a response body without requiring an SDK id', () => {
+    const headers = { 'content-type': 'text/event-stream' };
+    const merged = mergeNetworkDetail([
+      request('n1'),
+      {
+        type: EventType.NET_DETAIL,
+        sessionId: 'sse-test',
+        t: 2,
+        data: {
+          method: 'POST',
+          url: '/api/chat',
+          status: 200,
+          headers,
+          responseBody: 'data: wire\n\n',
+        },
+      },
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.data['headers']).toEqual(headers);
+  });
+
+  it('does not fall back to the URL when an SDK detail has no matching id', () => {
+    const merged = mergeNetworkDetail([
+      request('n1'),
+      detail('missing', 'data: other\n\n', { headers: { etag: 'other' } }),
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(
+      merged.find((event) => EventType.NET_REQUEST === event.type)?.data['headers'],
+    ).toBeUndefined();
   });
 
   it('correlates overlapping streams by id, not only their shared URL', () => {

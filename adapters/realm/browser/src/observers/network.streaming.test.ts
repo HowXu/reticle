@@ -1,7 +1,7 @@
 import { ReadableStream } from 'node:stream/web';
 import { TextDecoder, TextEncoder } from 'node:util';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { EventType } from '@reticlehq/core';
+import { EventType, parseEventPayload } from '@reticlehq/core';
 import { installNetwork } from './network.js';
 import { setNetworkBodyMaxChars } from './net-detail/network-body.js';
 import type { Emit, Teardown } from './types.js';
@@ -106,18 +106,54 @@ describe('SSE response body capture (#1848)', () => {
     stream.write('data: hello\n\n');
     await flushBody();
     expect(events.filter((e) => e.type === EventType.NET_REQUEST)).toHaveLength(1);
-    expect(events.filter((e) => e.type === EventType.NET_DETAIL)).toHaveLength(0);
+    expect(events.filter((e) => e.type === EventType.NET_RESPONSE_BODY)).toHaveLength(0);
     stream.write('data: world\n\n');
     stream.close();
     expect(await appBody).toBe('data: hello\n\ndata: world\n\n');
     await flushBody();
-    const requests = events.filter((event) => EventType.NET_DETAIL === event.type);
+    const requests = events.filter((event) => EventType.NET_RESPONSE_BODY === event.type);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.data['responseBody']).toBe('data: hello\n\ndata: world\n\n');
     expect(requests[0]?.data['responseBodyTruncated']).toBeUndefined();
     expect(requests[0]?.data['responseBodyReason']).toBeUndefined();
+    expect(parseEventPayload(EventType.NET_RESPONSE_BODY, requests[0]?.data)).toMatchObject({
+      success: true,
+      data: requests[0]?.data,
+    });
     // SSE does not enter the generic settle watcher, even with capture on.
     expect(events.filter((e) => e.type === EventType.NET_STREAM)).toHaveLength(0);
+  });
+
+  it('does not emit a body detail when cloning fails', async () => {
+    const stream = controlledSse();
+    stream.res.clone = () => {
+      throw new Error('locked');
+    };
+    vi.stubGlobal('fetch', () => Promise.resolve(stream.res));
+    const { emit, events } = collect();
+    teardowns.push(installNetwork(emit, { captureBodies: true }));
+    const res = await window.fetch('/api/chat');
+    stream.write('data: app only\n\n');
+    stream.close();
+    expect(await readAppBody(res)).toBe('data: app only\n\n');
+    await flushBody();
+    expect(events.filter((event) => EventType.NET_REQUEST === event.type)).toHaveLength(1);
+    expect(events.filter((event) => EventType.NET_RESPONSE_BODY === event.type)).toHaveLength(0);
+  });
+
+  it('does not emit a body detail when teardown interrupts an empty stream', async () => {
+    const stream = controlledSse();
+    vi.stubGlobal('fetch', () => Promise.resolve(stream.res));
+    const { emit, events } = collect();
+    const teardown = installNetwork(emit, { captureBodies: true });
+    teardowns.push(teardown);
+    const res = await window.fetch('/api/chat');
+    teardown();
+    await flushBody();
+    expect(events.filter((event) => EventType.NET_RESPONSE_BODY === event.type)).toHaveLength(0);
+    stream.write('data: app only\n\n');
+    stream.close();
+    expect(await readAppBody(res)).toBe('data: app only\n\n');
   });
 
   it('emits a truncated prefix without waiting for the app branch to finish', async () => {
@@ -131,7 +167,7 @@ describe('SSE response body capture (#1848)', () => {
     const prefix = 'data: ' + 'x'.repeat(2000) + '\n\n';
     stream.write(prefix);
     await flushBody();
-    const requests = events.filter((event) => EventType.NET_DETAIL === event.type);
+    const requests = events.filter((event) => EventType.NET_RESPONSE_BODY === event.type);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.data['responseBody']).toBe('data: ' + 'x'.repeat(250));
     expect(requests[0]?.data['responseBodyTruncated']).toBe(true);
@@ -154,7 +190,7 @@ describe('SSE response body capture (#1848)', () => {
     await flushBody();
     teardown();
     await flushBody();
-    const requests = events.filter((event) => EventType.NET_DETAIL === event.type);
+    const requests = events.filter((event) => EventType.NET_RESPONSE_BODY === event.type);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.data['responseBody']).toBe('data: first\n\n');
     expect(requests[0]?.data['responseBodyTruncated']).toBe(true);

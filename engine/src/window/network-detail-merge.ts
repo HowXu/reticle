@@ -50,12 +50,13 @@ export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEven
   const out: ReticleEvent[] = [];
   const enriched = new Map<ReticleEvent, ReticleEvent>();
   for (const e of events) {
-    if (e.type === EventType.NET_DETAIL) {
+    if (e.type === EventType.NET_DETAIL || e.type === EventType.NET_RESPONSE_BODY) {
+      const sdkBody = e.type === EventType.NET_RESPONSE_BODY;
       const responseBody = e.data['responseBody'];
       const id = e.data['id'];
       // SDK body details carry the page's request id. URL alone mixes concurrent streams at one endpoint.
       let match: ReticleEvent | undefined;
-      if ('string' === typeof responseBody) {
+      if (sdkBody) {
         if ('string' === typeof id) {
           match = requestById.get(id);
         }
@@ -68,7 +69,7 @@ export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEven
       }
       const base = enriched.get(match) ?? match;
       const data = { ...base.data };
-      if ('string' === typeof responseBody) {
+      if (sdkBody && 'string' === typeof responseBody) {
         data['responseBody'] = responseBody;
         if (true === e.data['responseBodyTruncated']) {
           data['responseBodyTruncated'] = true;
@@ -109,7 +110,7 @@ export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEven
     }
   }
   for (const e of events) {
-    if (e.type === EventType.NET_DETAIL) {
+    if (e.type === EventType.NET_DETAIL || e.type === EventType.NET_RESPONSE_BODY) {
       continue;
     } // handled above
     out.push(enriched.get(e) ?? e);
