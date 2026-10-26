@@ -39,9 +39,13 @@ export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEven
   const requestByKey = new Map<string, ReticleEvent>();
   const requestById = new Map<string, ReticleEvent>();
   for (const e of events) {
-    if (e.type !== EventType.NET_REQUEST) continue;
+    if (e.type !== EventType.NET_REQUEST) {
+      continue;
+    }
     requestByKey.set(keyOf(e.data), e);
-    if ('string' === typeof e.data['id']) requestById.set(e.data['id'], e);
+    if ('string' === typeof e.data['id']) {
+      requestById.set(e.data['id'], e);
+    }
   }
   const out: ReticleEvent[] = [];
   const enriched = new Map<ReticleEvent, ReticleEvent>();
@@ -50,12 +54,14 @@ export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEven
       const responseBody = e.data['responseBody'];
       const id = e.data['id'];
       // SDK body details carry the page's request id. URL alone mixes concurrent streams at one endpoint.
-      const match =
-        'string' === typeof responseBody
-          ? 'string' === typeof id
-            ? requestById.get(id)
-            : undefined
-          : requestByKey.get(keyOf(e.data));
+      let match: ReticleEvent | undefined;
+      if ('string' === typeof responseBody) {
+        if ('string' === typeof id) {
+          match = requestById.get(id);
+        }
+      } else {
+        match = requestByKey.get(keyOf(e.data));
+      }
       if (match === undefined || keyOf(match.data) !== keyOf(e.data)) {
         out.push(e); // unmatched detail survives on its own
         continue;
@@ -64,8 +70,11 @@ export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEven
       const data = { ...base.data };
       if ('string' === typeof responseBody) {
         data['responseBody'] = responseBody;
-        if (true === e.data['responseBodyTruncated']) data['responseBodyTruncated'] = true;
-        else delete data['responseBodyTruncated'];
+        if (true === e.data['responseBodyTruncated']) {
+          data['responseBodyTruncated'] = true;
+        } else {
+          delete data['responseBodyTruncated'];
+        }
         delete data['responseBodyReason'];
       }
       if (data['headers'] === undefined && e.data['headers'] !== undefined) {
@@ -89,15 +98,20 @@ export function mergeNetworkDetail(events: readonly ReticleEvent[]): ReticleEven
         // rather than fills a gap. Carried over when the wire body was cut, deleted when it was not:
         // a stale `true` from the page capture would caveat a body that is now whole, and a missing
         // one would let a cut body read as complete.
-        if (true === e.data['requestBodyTruncated']) data['requestBodyTruncated'] = true;
-        else delete data['requestBodyTruncated'];
+        if (true === e.data['requestBodyTruncated']) {
+          data['requestBodyTruncated'] = true;
+        } else {
+          delete data['requestBodyTruncated'];
+        }
       }
       enriched.set(match, { ...base, data });
       continue; // the detail is absorbed into the request
     }
   }
   for (const e of events) {
-    if (e.type === EventType.NET_DETAIL) continue; // handled above
+    if (e.type === EventType.NET_DETAIL) {
+      continue;
+    } // handled above
     out.push(enriched.get(e) ?? e);
   }
   return out;

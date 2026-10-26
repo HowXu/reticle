@@ -17,7 +17,9 @@ import type { Emit, Teardown } from './types.js';
 const teardowns: Teardown[] = [];
 beforeEach(() => vi.stubGlobal('TextDecoder', TextDecoder));
 afterEach(() => {
-  for (const t of teardowns.splice(0)) t();
+  for (const t of teardowns.splice(0)) {
+    t();
+  }
   vi.unstubAllGlobals();
 });
 
@@ -140,13 +142,17 @@ function fakeXhr(contentType: string, responseType: string, responseText = 'data
       /* recorded by the patch */
     }
     send(): void {
-      for (const listener of this.#listeners) listener();
+      for (const listener of this.#listeners) {
+        listener();
+      }
     }
     getResponseHeader(name: string): string | null {
       return 'content-type' === name.toLowerCase() ? contentType : null;
     }
     addEventListener(type: string, listener: () => void): void {
-      if ('loadend' === type) this.#listeners.push(listener);
+      if ('loadend' === type) {
+        this.#listeners.push(listener);
+      }
     }
   }
   vi.stubGlobal('XMLHttpRequest', FakeXhr);

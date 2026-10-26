@@ -19,7 +19,9 @@ async function readEventStream(
   clone: Response,
   signal: AbortSignal,
 ): Promise<{ text: string; complete: boolean } | undefined> {
-  if (signal.aborted || typeof clone.body?.getReader !== 'function') return undefined;
+  if (signal.aborted || typeof clone.body?.getReader !== 'function') {
+    return undefined;
+  }
   const reader = clone.body.getReader();
   const decoder = new TextDecoder();
   const limit = networkBodyMaxChars() * REDACTION_LOOKAHEAD;
@@ -42,7 +44,9 @@ async function readEventStream(
       (async () => {
         while (!stopped && !signal.aborted) {
           const next = await reader.read();
-          if (stopped || signal.aborted) return;
+          if (stopped || signal.aborted) {
+            return;
+          }
           if (next.done) {
             text += decoder.decode();
             complete = true;
@@ -52,7 +56,9 @@ async function readEventStream(
           const bytes = next.value.subarray(0, remaining * UTF8_MAX_BYTES_PER_CHAR);
           const decoded = decoder.decode(bytes, { stream: true });
           text += decoded.slice(0, remaining);
-          if (text.length >= limit || bytes.byteLength < next.value.byteLength) return;
+          if (text.length >= limit || bytes.byteLength < next.value.byteLength) {
+            return;
+          }
         }
       })(),
       interrupted,
@@ -62,7 +68,9 @@ async function readEventStream(
   } finally {
     nativeClearTimeout(timer);
     signal.removeEventListener('abort', stop);
-    if (!complete) void reader.cancel().catch(() => undefined);
+    if (!complete) {
+      void reader.cancel().catch(() => undefined);
+    }
     reader.releaseLock();
   }
   return !complete && 0 === text.length ? undefined : { text, complete };
@@ -76,7 +84,9 @@ export async function captureResponseBody(
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const unreadable = captureBodies ? { responseBodyReason: ResponseBodyReason.UNREADABLE } : {};
-  if (isEventStream(contentType) && (!captureBodies || signal.aborted)) return unreadable;
+  if (isEventStream(contentType) && (!captureBodies || signal.aborted)) {
+    return unreadable;
+  }
   try {
     const clone = response.clone();
     let text: string | undefined;
@@ -85,8 +95,12 @@ export async function captureResponseBody(
       const stream = await readEventStream(clone, signal);
       text = stream?.text;
       incomplete = false === stream?.complete;
-    } else text = await withBodyDeadline(clone.text());
-    if (undefined === text) return unreadable;
+    } else {
+      text = await withBodyDeadline(clone.text());
+    }
+    if (undefined === text) {
+      return unreadable;
+    }
     const projected = captureBodies
       ? projectBody(text, contentType)
       : projectErrorBody(text, contentType);

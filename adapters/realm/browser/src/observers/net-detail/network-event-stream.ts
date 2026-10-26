@@ -27,12 +27,16 @@ export function redactEventStream(text: string): { body: string; truncated: bool
         .filter(isData)
         .map((line) => line.slice(DATA_FIELD.length).replace(/^ /, ''))
         .join('\n');
-      if (!JSON_CONTAINER.test(data.trimStart()) || TEXT_MARKER.test(data.trim())) return record;
+      if (!JSON_CONTAINER.test(data.trimStart()) || TEXT_MARKER.test(data.trim())) {
+        return record;
+      }
       let projected: string;
       try {
         const sanitized = sanitizeWithReport(JSON.parse(data));
         projected = JSON.stringify(sanitized.value);
-        if (sanitized.truncation !== undefined) truncated = true;
+        if (sanitized.truncation !== undefined) {
+          truncated = true;
+        }
       } catch {
         projected = REDACTED_VALUE;
         truncated = true;
@@ -40,8 +44,12 @@ export function redactEventStream(text: string): { body: string; truncated: bool
       let first = true;
       return lines
         .flatMap((line) => {
-          if (!isData(line)) return [line];
-          if (!first) return [];
+          if (!isData(line)) {
+            return [line];
+          }
+          if (!first) {
+            return [];
+          }
           first = false;
           return [`${DATA_FIELD} ${projected}`];
         })

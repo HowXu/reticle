@@ -86,7 +86,10 @@ describe('SSE bodies enrich the completed request without duplicating it (#1848)
     });
     expect(missed.pass).toBe(false);
     expect(missed.inconclusive !== undefined).toBe(truncated);
-    if (truncated) expect(missed.failureReason).toBeUndefined();
-    else expect(missed.failureReason).toBeDefined();
+    if (truncated) {
+      expect(missed.failureReason).toBeUndefined();
+    } else {
+      expect(missed.failureReason).toBeDefined();
+    }
   });
 });

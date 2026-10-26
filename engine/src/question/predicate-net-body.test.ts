@@ -56,8 +56,12 @@ describe('evalNet — captured SSE bodies (#1848)', () => {
     });
     expect(result.pass).toBe(pass);
     expect(result.inconclusive !== undefined).toBe(unknown);
-    if (unknown) expect(result.failureReason).toBeUndefined();
-    if (!pass && !unknown) expect(result.failureReason).toBeDefined();
+    if (unknown) {
+      expect(result.failureReason).toBeUndefined();
+    }
+    if (!pass && !unknown) {
+      expect(result.failureReason).toBeDefined();
+    }
   });
 });
 

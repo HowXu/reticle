@@ -21,7 +21,9 @@ import type { Emit, Teardown } from './types.js';
 
 const teardowns: Teardown[] = [];
 afterEach(() => {
-  for (const t of teardowns.splice(0)) t();
+  for (const t of teardowns.splice(0)) {
+    t();
+  }
   setNetworkBodyMaxChars(8192);
   vi.unstubAllGlobals();
 });
@@ -58,12 +60,16 @@ function controlledSse(status = 200) {
 
 async function readAppBody(res: Response): Promise<string> {
   const reader = res.body?.getReader();
-  if (reader === undefined) throw new Error('response has no body');
+  if (reader === undefined) {
+    throw new Error('response has no body');
+  }
   const decoder = new TextDecoder();
   let text = '';
   for (;;) {
     const next = await reader.read();
-    if (next.done) return text + decoder.decode();
+    if (next.done) {
+      return text + decoder.decode();
+    }
     text += decoder.decode(next.value, { stream: true });
   }
 }

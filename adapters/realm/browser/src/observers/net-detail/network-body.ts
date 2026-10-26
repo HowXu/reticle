@@ -42,7 +42,9 @@ const ENDLESS_BY_DESIGN = /event-stream/i;
  * Deliberately independent of content type, with one exception above for streams that never end.
  */
 export function isStreamingBody(contentType: string | null, contentLength: string | null): boolean {
-  if (contentType !== null && ENDLESS_BY_DESIGN.test(contentType)) return false;
+  if (contentType !== null && ENDLESS_BY_DESIGN.test(contentType)) {
+    return false;
+  }
   return null === contentLength;
 }
 
@@ -73,7 +75,9 @@ export async function withBodyDeadline(read: Promise<string>): Promise<string | 
       }),
     ]);
   } finally {
-    if (timer !== undefined) nativeClearTimeout(timer);
+    if (timer !== undefined) {
+      nativeClearTimeout(timer);
+    }
   }
 }
 
@@ -83,15 +87,21 @@ export async function withBodyDeadline(read: Promise<string>): Promise<string | 
  * `undefined` when there is no content type at all: a 204 or a HEAD has no body to skip.
  */
 export function skippedBodyReason(contentType: string | null): ResponseBodyReason | undefined {
-  if (null === contentType) return undefined;
+  if (null === contentType) {
+    return undefined;
+  }
   return STREAMING_CONTENT.test(contentType)
     ? ResponseBodyReason.STREAMING
     : ResponseBodyReason.NOT_TEXT;
 }
 
 export function isCapturableType(contentType: string | null): boolean {
-  if (null === contentType) return false;
-  if (STREAMING_CONTENT.test(contentType)) return false;
+  if (null === contentType) {
+    return false;
+  }
+  if (STREAMING_CONTENT.test(contentType)) {
+    return false;
+  }
   return CAPTURABLE_CONTENT.test(contentType);
 }
 
@@ -129,7 +139,9 @@ let bodyMaxChars = DEFAULT_BODY_CHARS;
  * a budget, not a contract, and failing an app's `connect()` over one is the wrong trade.
  */
 export function setNetworkBodyMaxChars(chars: number): void {
-  if (!Number.isFinite(chars)) return;
+  if (!Number.isFinite(chars)) {
+    return;
+  }
   bodyMaxChars = Math.min(
     MAX_CONFIGURABLE_BODY_CHARS,
     Math.max(MIN_CONFIGURABLE_BODY_CHARS, Math.floor(chars)),
@@ -191,7 +203,9 @@ function redactText(text: string): string {
       .replace(
         /([A-Za-z0-9_.-]+)("?\s*[=:]\s*)("(?:\\.|[^"\\])*"?|[^&\s,;"}]+)/g,
         (match: string, key: string, sep: string, value: string) => {
-          if (!isSensitiveKey(key)) return match;
+          if (!isSensitiveKey(key)) {
+            return match;
+          }
           const redacted = value.startsWith('"') ? `"${REDACTED_VALUE}"` : REDACTED_VALUE;
           return `${key}${sep}${redacted}`;
         },
@@ -243,7 +257,9 @@ export function projectErrorBody(
   contentType: string | null,
 ): { body: string; truncated: boolean } {
   const projected = projectBody(rawText, contentType);
-  if (projected.body.length <= ERROR_BODY_CHARS) return projected;
+  if (projected.body.length <= ERROR_BODY_CHARS) {
+    return projected;
+  }
   return { body: projected.body.slice(0, ERROR_BODY_CHARS), truncated: true };
 }
 

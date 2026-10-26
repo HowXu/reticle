@@ -23,7 +23,9 @@ function chunks(parts: string[]): Response {
   return response(
     new ReadableStream<Uint8Array>({
       start(controller) {
-        for (const part of parts) controller.enqueue(encoder.encode(part));
+        for (const part of parts) {
+          controller.enqueue(encoder.encode(part));
+        }
         controller.close();
       },
     }),
@@ -177,8 +179,11 @@ describe('bounded SSE body capture (#1848)', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       // Resolve the stop and the pending read in one turn, before promise continuations run.
-      if ('deadline' === reason) vi.advanceTimersByTime(10_000);
-      else abort.abort();
+      if ('deadline' === reason) {
+        vi.advanceTimersByTime(10_000);
+      } else {
+        abort.abort();
+      }
       write('data: too late\n\n');
 
       expect(await pending).toEqual({
@@ -250,7 +255,9 @@ describe('bounded SSE body capture (#1848)', () => {
           if (first) {
             first = false;
             controller.enqueue(encoder.encode('data: hello\n\n'));
-          } else controller.error(new Error('connection closed'));
+          } else {
+            controller.error(new Error('connection closed'));
+          }
         },
       }),
     );
